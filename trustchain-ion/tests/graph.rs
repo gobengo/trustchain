@@ -30,7 +30,7 @@ fn trustchain_graph() {
     ];
     let mut chains = vec![];
     for did in new_dids {
-        let chain = DIDChain::new(did, &resolver).unwrap();
+        let chain = DIDChain::new(did, &resolver, None).unwrap();
         chain.verify_proofs().unwrap();
         chains.push(chain);
     }

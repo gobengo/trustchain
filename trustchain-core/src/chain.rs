@@ -1,5 +1,6 @@
 use crate::resolver::Resolver;
 use crate::utils::{canonicalize, decode, decode_verify, hash};
+use crate::verifier::{Verifier, VerifierError};
 use crate::ROOT_EVENT_TIME_2378493;
 use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,8 @@ pub trait Chain {
     fn verify_proofs(&self) -> Result<(), ChainError>;
     /// Return view of chain in correct order
     fn as_vec(&self) -> &Vec<String>;
+    /// Gets root timestamp.
+    fn get_root_timestamp(&self) -> Option<u32>;
 }
 
 /// Gets proof from DocumentMetadata.
@@ -105,6 +108,9 @@ pub struct DIDChain {
 
     // Vector to keep track of the level of each DID.
     level_vec: Vec<String>,
+
+    // Root timestamp
+    root_timestamp: Option<u32>,
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
@@ -225,10 +231,31 @@ impl fmt::Display for DIDChain {
 }
 
 impl DIDChain {
+    /// Assign root timestamp
+    fn assign_root_timestamp<T: DIDResolver + Sync + Send>(
+        &mut self,
+        verifier: &dyn Verifier<T>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Ok(block_height) = verifier.verified_block_height(self.root()) {
+            if let Ok(unixtime) = verifier.block_height_to_unixtime(block_height) {
+                self.root_timestamp = Some(unixtime);
+            } else {
+                // TODO: implement mapping from verifier error to chain error or box in chain
+                return Err(Box::new(VerifierError::FailureToGetUnixTime(block_height)));
+            }
+        } else {
+            return Err(Box::new(VerifierError::FailureToGetBlockHeight(
+                self.root().to_owned(),
+            )));
+        }
+        Ok(())
+    }
+
     // Public constructor.
     pub fn new<T: DIDResolver + Sync + Send>(
         did: &str,
         resolver: &Resolver<T>,
+        verifier: Option<&dyn Verifier<T>>,
     ) -> Result<Self, ChainError> {
         // Result<Box<Self>, ChainError> {
 
@@ -257,7 +284,7 @@ impl DIDChain {
                 let udid = match controller {
                     None => {
                         chain.level_vec.reverse();
-                        return Ok(chain);
+                        break;
                     }
                     Some(x) => match x.to_owned() {
                         OneOrMany::One(udid) => udid,
@@ -272,13 +299,23 @@ impl DIDChain {
                 return Err(ChainError::ResolutionFailure(ddid));
             }
         }
+
+        // Assign timestamp if a verifier is passed
+        if let Some(verifier) = verifier {
+            // TODO: handle error
+            chain.assign_root_timestamp(verifier);
+        }
+        Ok(chain)
     }
+
+    // fn set_timestamp(&mut self, )
 
     /// Private constructor of an empty DIDChain.
     fn empty() -> Self {
         Self {
             did_map: HashMap::<String, (Document, DocumentMetadata)>::new(),
             level_vec: Vec::<String>::new(),
+            root_timestamp: None,
         }
     }
 
@@ -291,6 +328,10 @@ impl DIDChain {
 }
 
 impl Chain for DIDChain {
+    fn get_root_timestamp(&self) -> Option<u32> {
+        self.root_timestamp
+    }
+
     fn as_vec(&self) -> &Vec<String> {
         &self.level_vec
     }
@@ -428,6 +469,8 @@ mod tests {
         }
     ]
     "##;
+
+    // TODO: add tests for case where verifier is passed to DIDChain::new()
 
     #[test]
     fn test_get_proof() -> Result<(), Box<dyn std::error::Error>> {
