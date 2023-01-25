@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use futures::executor::block_on;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ssi::did::{DIDMethod, Document, Service, ServiceEndpoint};
 use ssi::did_resolve::{
@@ -45,6 +46,28 @@ type ResolverResult = Result<
     ),
     ResolverError,
 >;
+
+/// Struct for handling resolution metadata, document and document metadata returned from a resolver.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ResolverStruct {
+    resolution_metadata: ResolutionMetadata,
+    document: Option<Document>,
+    document_metadata: Option<DocumentMetadata>,
+}
+
+impl ResolverStruct {
+    pub fn new(
+        res: ResolutionMetadata,
+        doc: Option<Document>,
+        doc_meta: Option<DocumentMetadata>,
+    ) -> Self {
+        Self {
+            resolution_metadata: res,
+            document: doc,
+            document_metadata: doc_meta,
+        }
+    }
+}
 
 // Newtype pattern (workaround for lack of trait upcasting coercion).
 // Specifically, the DIDMethod method to_resolver() returns a reference but we want ownership.
@@ -847,5 +870,13 @@ mod tests {
             Err(e) => assert_eq!(e, ResolverError::MultipleTrustchainProofService),
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn test_resolver_struct() -> Result<(), Box<dyn std::error::Error>> {
+        let doc: Document = serde_json::from_str(TEST_SIDETREE_DOCUMENT)?;
+        let doc_meta: DocumentMetadata = serde_json::from_str(TEST_SIDETREE_DOCUMENT_METADATA)?;
+        ResolverStruct::new(ResolutionMetadata::default(), Some(doc), Some(doc_meta));
+        Ok(())
     }
 }

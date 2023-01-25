@@ -1,10 +1,13 @@
 //! Trustchain CLI binary
 use clap::{arg, ArgAction, Command};
+use serde_json::to_string_pretty;
 use std::fs::File;
+use trustchain_core::{resolver::ResolverStruct, verifier::Verifier, ROOT_EVENT_TIME_2378493};
 use trustchain_ion::{
     attest::attest_operation,
     create::{create_operation, read_doc_state_from},
-    resolve::main_resolve,
+    get_ion_resolver,
+    verifier::IONVerifier,
 };
 
 fn cli() -> Command {
@@ -38,6 +41,12 @@ fn cli() -> Command {
                         .about("Resolves a DID.")
                         .arg(arg!(-v --verbose <VERBOSE>).action(ArgAction::SetTrue))
                         .arg(arg!(-d --did <DID>).required(true)),
+                )
+                .subcommand(
+                    Command::new("verify")
+                        .about("Verifies a DID returning the verified chain of DIDs.")
+                        .arg(arg!(-v --verbose <VERBOSE>).action(ArgAction::SetTrue))
+                        .arg(arg!(-d --did <DID>).required(true)),
                 ),
         )
 }
@@ -47,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match matches.subcommand() {
         Some(("did", sub_matches)) => {
+            let resolver = get_ion_resolver("http://localhost:3000/");
             match sub_matches.subcommand() {
                 Some(("create", sub_matches)) => {
                     let file_path = sub_matches.get_one::<String>("file_path");
@@ -76,8 +86,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Some(("resolve", sub_matches)) => {
                     let did = sub_matches.get_one::<String>("did").unwrap();
-                    let verbose = matches!(sub_matches.get_one::<bool>("verbose"), Some(true));
-                    main_resolve(did, verbose)?;
+                    let _verbose = matches!(sub_matches.get_one::<bool>("verbose"), Some(true));
+                    let result = resolver.resolve_as_result(did)?;
+                    let resolver_struct = ResolverStruct::new(result.0, result.1, result.2);
+                    println!("{}", to_string_pretty(&resolver_struct).unwrap());
+                }
+                Some(("verify", sub_matches)) => {
+                    let did = sub_matches.get_one::<String>("did").unwrap();
+                    let _verbose = matches!(sub_matches.get_one::<bool>("verbose"), Some(true));
+                    let verifier = IONVerifier::new(resolver);
+                    let did_chain = verifier.verify(did, ROOT_EVENT_TIME_2378493)?;
+                    println!("{}", to_string_pretty(&did_chain).unwrap());
                 }
                 _ => panic!("Unrecognised DID subcommand."),
             }
